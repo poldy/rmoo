@@ -315,37 +315,29 @@
 		   nil)
 
 (defun rmoo-mcp-initialize-ping (proc)
-  (message "rmoo-mcp-initialize-ping")
   (setq-local rmoo-ping-currentid 4000
 	      rmoo-ping-time (float-time))
-  (message "initialize: currentid = %d" rmoo-ping-currentid)
   (rmoo-send-string (concat "#$#dns-com-awns-ping " rmoo-mcp-auth-key " id: " (number-to-string rmoo-ping-currentid)) proc))
 
 ;; NB: this doesn't run with the current buffer, for setq-local, set
 (defun rmoo-mcp-dns-awns-ping (buf)
-  (message "rmoo-mcp-dns-awns-ping")
   (with-current-buffer buf
-    (message "dns-awns-ping: currentid = %d" rmoo-ping-currentid)
     (setq-local rmoo-ping-currentid (+ rmoo-ping-currentid 1))
-    (message "dns-awns-ping: currentid becomes %d" rmoo-ping-currentid)
     (setq-local rmoo-ping-time (float-time))
     (let ((proc (get-buffer-process buf)))
       (rmoo-send-string (concat "#$#dns-com-awns-ping " rmoo-mcp-auth-key " id: " (number-to-string rmoo-ping-currentid)) proc))))
 
 (defun rmoo-mcp-ping-show-rtt (rtt-text)
-  (message "rmoo-mcp-ping-show-rtt")
   (if (boundp 'rmoo-ping-text)
       (delete rmoo-ping-text mode-line-misc-info))
   (add-to-list 'mode-line-misc-info rtt-text 'APPEND)
   (setq-local rmoo-ping-text rtt-text))
 
 (defun rmoo-mcp-do-ping (id)
-  (message "rmoo-mcp-do-ping")
   (let ((rtt (truncate (- (float-time) rmoo-ping-time))))
     (if (= (string-to-number id) rmoo-ping-currentid)
 	(rmoo-mcp-ping-show-rtt (format "%5d" rtt)))
-    (run-with-timer 10 nil #'rmoo-mcp-dns-awns-ping (current-buffer))))
-    ;; (run-at-time 30 nil #'rmoo-mcp-dns-awns-ping proc)))
+    (run-with-timer 30 nil #'rmoo-mcp-dns-awns-ping (current-buffer))))
 
 (defun rmoo-mcp-nil-function (line) "Okay, this is a kludge")
 
