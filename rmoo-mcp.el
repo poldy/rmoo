@@ -7,6 +7,7 @@
 ;; Original Authors: Ron Tapia, Erik, mattcamp
 ;;
 (require 'rmoo)
+(require 'url-queue)
 (provide 'rmoo-mcp)
 (provide 'mcp)
 
@@ -25,6 +26,8 @@
   "An intermediary associated list used to temporarily store information needed in editor buffers.")
 
 (defcustom rmoo-mcp-record-unknown nil "Whether or not unrecognized MCP data will get added to a new 'unknown data' buffer." :group 'rmoo :type 'boolean)
+
+(defcustom rmoo-mcp-sound-cache "/tmp" "Where to cache locally-downloaded sound files" :group 'rmoo :type 'directory)
 
 (defvar rmoo-mcp-cleanup-function nil)
 
@@ -286,6 +289,30 @@
 (defun rmoo-mcp-initialize-client (proc)
   (rmoo-send-string (concat "#$#dns-com-vmoo-client-info " rmoo-mcp-auth-key " name: \"RMOO (Emacs)\" text-version: \"" rmoo-version "\" internal-version: \"0\"") proc)
   (rmoo-send-string (concat "#$#dns-com-vmoo-client-screensize " rmoo-mcp-auth-key " Cols: " (number-to-string (- (window-total-width) 5)) " Rows: " (number-to-string (window-total-height))) proc))
+
+(rmoo-mcp-register "dns-com-zuggsoft-msp-sound"
+		   '(("name" . 'required)
+		     ("v" . 'required)
+		     ("l" . 'required)
+		     ("p" . 'required)
+		     ("t" . 'required)
+		     ("u" . 'required))
+		   'rmoo-mcp-do-sound
+		   "1.0"
+		   "2.0"
+		   nil)
+
+(defun rmoo-mcp-do-sound (name v l p t u)
+  (let* ((dirname (file-name-directory name))
+	 (basename (file-name-nondirectory name))
+	 ;; Easier to use absolute filenames and ignore data-dir
+	 (cache-dir (string-join (list rmoo-mcp-sound-cache dirname) "/"))
+	 (cache-file (string-join (list cache-dir basename))))
+    (mkdir cache-dir t)
+    (url-queue-retrieve (string-join (list u basename))
+			(lambda (status)
+			  (write-region nil nil cache-file)
+			  (play-sound (list :file cache-file :volume v))))))
 
 (defun rmoo-mcp-redirect-function (line)
   (if (string-match "^#$#mcp version: [0-9]\.[0-9] to: [0-9]\.[0-9]$" line)
