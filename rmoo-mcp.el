@@ -302,7 +302,7 @@
 		   "2.0"
 		   nil)
 
-(defun rmoo-mcp-do-sound (name v l p t u)
+(defun rmoo-mcp-do-sound (name v l p type u)
   (let* ((dirname (file-name-directory name))
 	 (basename (file-name-nondirectory name))
 	 ;; Easier to use absolute filenames and ignore data-dir
