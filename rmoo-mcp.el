@@ -311,8 +311,16 @@
     (mkdir cache-dir t)
     (url-queue-retrieve (string-join (list u basename))
 			(lambda (status)
-			  (write-region nil nil cache-file)
-			  (play-sound (list :file cache-file :volume v))))))
+			  (if status
+			      (message-box "url-retrieve failed with status %s" status)
+			    (let* ((mime-handle (mm-dissect-buffer t))
+				   (mime-type (mm-handle-media-type mime-handle))
+				   (coding-system-for-write 'binary))
+			      (if (not (string-equal mime-type "audio/x-wav"))
+				  (message "url-retrieve fetched an unexpected MIME type %s" mime-type)
+				(with-current-buffer (mm-handle-buffer mime-handle)
+				  (write-region (point-min) (point-max) cache-file nil 5))
+				(play-sound (list 'sound :file cache-file :volume v)))))))))
 
 (defun rmoo-mcp-redirect-function (line)
   (if (string-match "^#$#mcp version: [0-9]\.[0-9] to: [0-9]\.[0-9]$" line)
