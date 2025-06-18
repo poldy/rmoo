@@ -28,6 +28,7 @@
 (defcustom rmoo-mcp-record-unknown nil "Whether or not unrecognized MCP data will get added to a new 'unknown data' buffer." :group 'rmoo :type 'boolean)
 
 (defcustom rmoo-mcp-sound-cache "/tmp" "Where to cache locally-downloaded sound files" :group 'rmoo :type 'directory)
+(defcustom rmoo-mcp-image-cache "/tmp" "Where to cache locally-downloaded image files" :group 'rmoo :type 'directory)
 
 (defvar rmoo-mcp-cleanup-function nil)
 
@@ -312,7 +313,7 @@
     (url-queue-retrieve (string-join (list u basename))
 			(lambda (status)
 			  (if status
-			      (message-box "url-retrieve failed with status %s" status)
+			      (message "url-retrieve failed with status %s" status)
 			    (let* ((mime-handle (mm-dissect-buffer t))
 				   (mime-type (mm-handle-media-type mime-handle))
 				   (coding-system-for-write 'binary))
@@ -384,6 +385,74 @@
 	(rmoo-mcp-ping-show-rtt (format "%5d" rtt)))
     (run-with-timer 30 nil #'rmoo-mcp-dns-awns-ping (current-buffer))))
 
+(rmoo-mcp-register "dns-com-vmoo-mmedia" '() nil "2.0" "2.0" 'rmoo-mcp-initialize-mmedia)
+
+(defun rmoo-mcp-initialize-mmedia (proc)
+  (rmoo-send-string (concat "#$#dns-com-vmoo-mmedia-accept " rmoo-mcp-auth-key " conspeed: 0 protocols: \"alias,http.local\" methods: \"music,play,preload,show\" insert: \"\" music: \"wav,aif,mp3\" play: \"wav\" show: \"png,gif\"") proc))
+
+(rmoo-mcp-register "dns-com-vmoo-mmedia-play"
+                   '(("ack-id" . 'required) ("file" . 'required))
+		   'rmoo-mcp-do-play
+		   "2.0"
+		   "2.0"
+		   nil)
+
+(defun rmoo-mcp-do-play (ack-id url)
+  (let* ((path (url-filename (url-generic-parse-url url)))
+	 (file (file-name-nondirectory path))
+	 (cache-file (string-join (list rmoo-mcp-sound-cache file) "/")))
+    (mkdir rmoo-mcp-sound-cache t)
+    (message "About to retrieve %s" url)
+    (url-queue-retrieve url
+			(lambda (status buf)
+			  (let ((error (plist-get status :error)))
+			    (if (not (null error))
+				(let ((error-symbol (car error))
+				      (data (cdr error)))
+				  (signal error-symbol data))
+			      (let* ((mime-handle (mm-dissect-buffer t))
+				     (mime-type (mm-handle-media-type mime-handle))
+				     (coding-system-for-write 'binary))
+				(if (not (string-equal mime-type "audio/x-wav"))
+				    (message "url-retrieve fetched an unexpected MIME type %s" mime-type)
+				  (with-current-buffer (mm-handle-buffer mime-handle)
+				    (write-region (point-min) (point-max) cache-file nil 5))
+				  (play-sound (list 'sound :file cache-file))
+				  (with-current-buffer buf
+				    (let ((proc (get-buffer-process buf)))
+				      (rmoo-send-string (concat "#$#dns-com-vmoo-mmedia-ack-stage " rmoo-mcp-auth-key " ack-id: " ack-id " method: \"play\" stage: 0") proc)
+				      (rmoo-send-string (concat "#$#dns-com-vmoo-mmedia-ack-stage " rmoo-mcp-auth-key " ack-id: " ack-id " method: \"play\" stage: 200") proc)
+				      (rmoo-send-string (concat "#$#dns-com-vmoo-mmedia-ack-stage " rmoo-mcp-auth-key " ack-id: " ack-id " method: \"play\" stage: 1000 reason: 1000") proc))))))))
+			(list (current-buffer)))))
+
+(rmoo-mcp-register "dns-com-vmoo-mmedia-show"
+                   '(("ack-id" . 'required) ("file" . 'required))
+		   'rmoo-mcp-do-show
+		   "2.0"
+		   "2.0"
+		   nil)
+
+(defun rmoo-mcp-do-show (ack-id url)
+  (let* ((path (url-filename (url-generic-parse-url url)))
+	 (file (file-name-nondirectory path))
+	 (cache-file (string-join (list rmoo-mcp-image-cache file) "/")))
+    (mkdir rmoo-mcp-image-cache t)
+    (url-queue-retrieve url
+			(lambda (status)
+			  (let ((error (plist-get status :error)))
+			    (if (not (null error))
+				(let ((error-symbol (car error))
+				      (data (cdr error)))
+				  (signal error-symbol data))
+			      (let* ((mime-handle (mm-dissect-buffer t))
+				     (mime-type (mm-handle-media-type mime-handle))
+				     (coding-system-for-write 'binary))
+				(if (not (string-equal mime-type "image/png"))
+				    (message "url-retrieve fetched an unexpected MIME type %s" mime-type)
+				  (with-current-buffer (mm-handle-buffer mime-handle)
+				    (write-region (point-min) (point-max) cache-file nil 5))
+				  (find-file cache-file)))))))))
+		   
 (defun rmoo-mcp-nil-function (line) "Okay, this is a kludge")
 
 (defun rmoo-mcp-output-function-hooks ())
