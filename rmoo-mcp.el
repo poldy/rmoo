@@ -28,6 +28,7 @@
 (defcustom rmoo-mcp-record-unknown nil "Whether or not unrecognized MCP data will get added to a new 'unknown data' buffer." :group 'rmoo :type 'boolean)
 
 (defcustom rmoo-mcp-sound-cache "/tmp" "Where to cache locally-downloaded sound files" :group 'rmoo :type 'directory)
+(defcustom rmoo-mcp-image-cache "/tmp" "Where to cache locally-downloaded image files" :group 'rmoo :type 'directory)
 
 (defvar rmoo-mcp-cleanup-function nil)
 
@@ -322,25 +323,37 @@
                "afplay" (append (and volume (list "-v" volume))
                                 (list (expand-file-name file data-directory))))))))
 
+(defun rmoo-mcp-url-retrieve (url mime-type cache-dir cb &optional cbargs)
+  (let* ((path (url-filename (url-generic-parse-url url)))
+	 (file (file-name-nondirectory path))
+	 (cache-file (string-join (list cache-dir file) "/")))
+    (mkdir cache-dir t)
+    (url-queue-retrieve url
+			(lambda (status buf)
+			  (let ((error (plist-get status :error)))
+			    (if (not (null error))
+				(let ((error-symbol (car error))
+				      (data (cdr error)))
+				  (signal error-symbol data))
+			      (let* ((mime-handle (mm-dissect-buffer t))
+				     (mime (mm-handle-media-type mime-handle))
+				     (coding-system-for-write 'binary))
+				(if (not (string-equal mime mime-type))
+				    (message "unexpected MIME type %s" mime)
+				  (with-current-buffer (mm-handle-buffer mime-handle)
+				    (write-region (point-min) (point-max) cache-file nil 5))
+				  (apply cb cache-file buf cbargs))))))
+			(list (current-buffer)))))
+
+(defun rmoo-mcp-sound-cb (file buf v)
+  (play-sound (list 'sound :file file :volume v)))
+
 (defun rmoo-mcp-do-sound (name v l p type u)
   (let* ((dirname (file-name-directory name))
-	 (basename (file-name-nondirectory name))
-	 ;; Easier to use absolute filenames and ignore data-dir
-	 (cache-dir (string-join (list rmoo-mcp-sound-cache dirname) "/"))
-	 (cache-file (string-join (list cache-dir basename))))
-    (mkdir cache-dir t)
-    (url-queue-retrieve (string-join (list u basename))
-			(lambda (status)
-			  (if status
-			      (message-box "url-retrieve failed with status %s" status)
-			    (let* ((mime-handle (mm-dissect-buffer t))
-				   (mime-type (mm-handle-media-type mime-handle))
-				   (coding-system-for-write 'binary))
-			      (if (not (string-equal mime-type "audio/x-wav"))
-				  (message "url-retrieve fetched an unexpected MIME type %s" mime-type)
-				(with-current-buffer (mm-handle-buffer mime-handle)
-				  (write-region (point-min) (point-max) cache-file nil 5))
-				(play-sound (list 'sound :file cache-file :volume v)))))))))
+	 (file (file-name-nondirectory name))
+	 (url (string-join (list u file)))
+	 (cache-dir (string-join (list rmoo-mcp-sound-cache dirname) "/")))
+    (rmoo-mcp-url-retrieve url "audio/x-wav" cache-dir 'rmoo-mcp-sound-cb (list v))))
 
 (defun rmoo-mcp-redirect-function (line)
   (if (string-match "^#$#mcp version: [0-9]\.[0-9] to: [0-9]\.[0-9]$" line)
@@ -353,6 +366,42 @@
                               (rmoo-match-string 6 line))
            'rmoo-mcp-nil-function)
           (t nil))))
+
+(rmoo-mcp-register "dns-com-vmoo-mmedia" '() nil "2.0" "2.0" 'rmoo-mcp-initialize-mmedia)
+
+(defun rmoo-mcp-initialize-mmedia (proc)
+  (rmoo-send-string (concat "#$#dns-com-vmoo-mmedia-accept " rmoo-mcp-auth-key " conspeed: 0 protocols: \"alias,http.local\" methods: \"music,play,preload,show\" insert: \"\" music: \"wav,aif,mp3\" play: \"wav\" show: \"png,gif\"") proc))
+
+(rmoo-mcp-register "dns-com-vmoo-mmedia-play"
+                   '(("ack-id" . 'required) ("file" . 'required))
+		   'rmoo-mcp-do-play
+		   "2.0"
+		   "2.0"
+		   nil)
+
+(defun rmoo-mcp-play-cb (file buf ack-id)
+  (play-sound (list 'sound :file file))
+  (with-current-buffer buf
+    (let ((proc (get-buffer-process buf)))
+      (rmoo-send-string (concat "#$#dns-com-vmoo-mmedia-ack-stage " rmoo-mcp-auth-key " ack-id: " ack-id " method: \"play\" stage: 0") proc)
+      (rmoo-send-string (concat "#$#dns-com-vmoo-mmedia-ack-stage " rmoo-mcp-auth-key " ack-id: " ack-id " method: \"play\" stage: 200") proc)
+      (rmoo-send-string (concat "#$#dns-com-vmoo-mmedia-ack-stage " rmoo-mcp-auth-key " ack-id: " ack-id " method: \"play\" stage: 1000 reason: 1000") proc))))
+
+(defun rmoo-mcp-do-play (ack-id url)
+  (rmoo-mcp-url-retrieve url "audio/x-wav" rmoo-mcp-sound-cache 'rmoo-mcp-play-cb (list ack-id)))
+
+(rmoo-mcp-register "dns-com-vmoo-mmedia-show"
+                   '(("ack-id" . 'required) ("file" . 'required))
+		   'rmoo-mcp-do-show
+		   "2.0"
+		   "2.0"
+		   nil)
+
+(defun rmoo-mcp-show-cb (file buf)
+  (find-file file))
+
+(defun rmoo-mcp-do-show (ack-id url)
+  (rmoo-mcp-url-retrieve url "image/png" rmoo-mcp-image-cache 'rmoo-mcp-show-cb))
 
 (defun rmoo-mcp-nil-function (line) "Okay, this is a kludge")
 
